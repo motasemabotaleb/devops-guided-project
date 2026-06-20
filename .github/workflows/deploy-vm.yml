@@ -129,15 +129,20 @@ jobs:
           printf '%s\n' "${VM_SSH_KEY}" > "${key_file}"
           chmod 600 "${key_file}"
 
-          ssh -i "${key_file}" \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            "${VM_USER}@${VM_HOST}" \
-            "export IMAGE_TAG='${IMAGE_TAG}' \
-            POSTGRES_PASSWORD='${POSTGRES_PASSWORD}' \
-            GRAFANA_ADMIN_PASSWORD='${GRAFANA_ADMIN_PASSWORD}' \
-            REGISTRY_LOGIN_SERVER='${REGISTRY_LOGIN_SERVER}' \
-            REGISTRY_USERNAME='${REGISTRY_USERNAME}' \
-            REGISTRY_PASSWORD='${REGISTRY_PASSWORD}'; \
-            cd '${VM_APP_DIR}'; \
-            bash deploy/deploy.sh '${IMAGE_TAG}'"
+          ssh_args=(
+            -i "${key_file}"
+            -o StrictHostKeyChecking=no
+            -o UserKnownHostsFile=/dev/null
+            "${VM_USER}@${VM_HOST}"
+          )
+
+          ssh "${ssh_args[@]}" <<EOF
+          export IMAGE_TAG='${IMAGE_TAG}'
+          export POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'
+          export GRAFANA_ADMIN_PASSWORD='${GRAFANA_ADMIN_PASSWORD}'
+          export REGISTRY_LOGIN_SERVER='${REGISTRY_LOGIN_SERVER}'
+          export REGISTRY_USERNAME='${REGISTRY_USERNAME}'
+          export REGISTRY_PASSWORD='${REGISTRY_PASSWORD}'
+          cd '${VM_APP_DIR}'
+          bash deploy/deploy.sh '${IMAGE_TAG}'
+          EOF
