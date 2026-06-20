@@ -56,4 +56,4 @@ Teams must explain one thing they learned from metrics and one thing they still 
 
 ## Next Step
 
-Continue to [LAB-06 GitHub Actions ACR](LAB-06-github-actions-ghcr.md).
+Continue to [LAB-06 GitHub Actions ACR](LAB-06-github-actions-acr.md).

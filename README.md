@@ -355,7 +355,7 @@ Run:
 
 Do:
 
-- [LAB-06 GitHub Actions ACR](labs/LAB-06-github-actions-ghcr.md)
+- [LAB-06 GitHub Actions ACR](labs/LAB-06-github-actions-acr.md)
 
 Read:
 

@@ -70,4 +70,4 @@ Use:
 
 ## Next Step
 
-Move to [LAB-06 GitHub Actions ACR](../labs/LAB-06-github-actions-ghcr.md).
+Move to [LAB-06 GitHub Actions ACR](../labs/LAB-06-github-actions-acr.md).

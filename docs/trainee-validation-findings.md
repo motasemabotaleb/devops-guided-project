@@ -48,16 +48,11 @@ Use it as the improvement backlog for the next polish pass.
 - impact: a healthy deployment looked partially broken
 - follow-up: validate that the file exists, and only expect entries after an error scenario
 
-### GitHub Journey Blocker
+### GitHub Journey Blocker At The Time
 
-- local GitHub CLI authentication was expired during this dry run
-- impact: the full GitHub repository creation, Actions secret setup, and workflow trigger path could not be completed from this workstation without re-authentication
-- follow-up: once GitHub auth is restored, complete:
-  - create the `devops-guided-project` repository
-  - add VM, registry, and Azure secrets
-  - push the repo
-  - run `ci-build-push.yml`
-  - run `deploy-vm.yml`
+- local GitHub CLI authentication was expired during the first dry run
+- impact then: the full GitHub repository creation, Actions secret setup, and workflow trigger path could not be completed from this workstation without re-authentication
+- current status: this blocker was cleared later, and the repository plus CI workflow were validated successfully
 
 ## 2026-06-20 GitHub Actions Follow-Up
 
