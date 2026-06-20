@@ -111,21 +111,33 @@ jobs:
           fi
 
       - name: Deploy selected tag to VM
-        uses: appleboy/ssh-action@v1.2.0
         env:
           IMAGE_TAG: ${{ inputs.image_tag }}
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_USER: ${{ secrets.VM_USER }}
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
           VM_APP_DIR: ${{ secrets.VM_APP_DIR }}
           POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
           GRAFANA_ADMIN_PASSWORD: ${{ env.GRAFANA_ADMIN_PASSWORD }}
           REGISTRY_LOGIN_SERVER: ${{ env.REGISTRY_LOGIN_SERVER }}
           REGISTRY_USERNAME: ${{ env.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ env.REGISTRY_PASSWORD }}
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          envs: IMAGE_TAG,VM_APP_DIR,POSTGRES_PASSWORD,GRAFANA_ADMIN_PASSWORD,REGISTRY_LOGIN_SERVER,REGISTRY_USERNAME,REGISTRY_PASSWORD
-          script: |
-            set -e
-            cd "${VM_APP_DIR}"
-            bash deploy/deploy.sh "${IMAGE_TAG}"
+        run: |
+          set -euo pipefail
+
+          key_file="${RUNNER_TEMP}/vm-deploy-key.pem"
+          printf '%s\n' "${VM_SSH_KEY}" > "${key_file}"
+          chmod 600 "${key_file}"
+
+          ssh -i "${key_file}" \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            "${VM_USER}@${VM_HOST}" \
+            "export IMAGE_TAG='${IMAGE_TAG}' \
+            POSTGRES_PASSWORD='${POSTGRES_PASSWORD}' \
+            GRAFANA_ADMIN_PASSWORD='${GRAFANA_ADMIN_PASSWORD}' \
+            REGISTRY_LOGIN_SERVER='${REGISTRY_LOGIN_SERVER}' \
+            REGISTRY_USERNAME='${REGISTRY_USERNAME}' \
+            REGISTRY_PASSWORD='${REGISTRY_PASSWORD}'; \
+            cd '${VM_APP_DIR}'; \
+            bash deploy/deploy.sh '${IMAGE_TAG}'"
