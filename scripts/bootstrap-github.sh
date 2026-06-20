@@ -56,13 +56,24 @@ set_secret_if_present() {
   fi
 }
 
+set_secret_from_file_if_present() {
+  local key="$1"
+  local file_path="${2:-}"
+
+  if [[ -n "${file_path}" && -f "${file_path}" ]]; then
+    gh secret set "${key}" --repo "${TARGET}" < "${file_path}"
+    echo "Set GitHub secret from file: ${key}"
+  else
+    echo "Skipped GitHub secret: ${key} (source file not provided)"
+  fi
+}
+
 echo
 echo "Setting GitHub Actions secrets when values are available..."
 
 for key in \
   VM_HOST \
   VM_USER \
-  VM_SSH_KEY \
   VM_APP_DIR \
   POSTGRES_PASSWORD \
   GRAFANA_ADMIN_PASSWORD \
@@ -75,6 +86,18 @@ for key in \
   AZURE_KEYVAULT_NAME; do
   set_secret_if_present "${key}"
 done
+
+if [[ -n "${VM_SSH_KEY:-}" ]]; then
+  printf '%s' "${VM_SSH_KEY}" | gh secret set VM_SSH_KEY --repo "${TARGET}" --body -
+  printf '%s' "${VM_SSH_KEY}" | base64 | tr -d '\n' | gh secret set VM_SSH_KEY_B64 --repo "${TARGET}" --body -
+  echo "Set GitHub secrets: VM_SSH_KEY and VM_SSH_KEY_B64"
+elif [[ -n "${VM_SSH_KEY_FILE:-}" ]]; then
+  set_secret_from_file_if_present "VM_SSH_KEY" "${VM_SSH_KEY_FILE}"
+  base64 < "${VM_SSH_KEY_FILE}" | tr -d '\n' | gh secret set VM_SSH_KEY_B64 --repo "${TARGET}" --body -
+  echo "Set GitHub secret from file: VM_SSH_KEY_B64"
+else
+  echo "Skipped GitHub secrets: VM_SSH_KEY and VM_SSH_KEY_B64 (not set in local environment)"
+fi
 
 echo
 echo "GitHub bootstrap complete."

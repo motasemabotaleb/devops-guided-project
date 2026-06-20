@@ -59,6 +59,44 @@ Use it as the improvement backlog for the next polish pass.
   - run `ci-build-push.yml`
   - run `deploy-vm.yml`
 
+## 2026-06-20 GitHub Actions Follow-Up
+
+### Confirmed Working
+
+- the GitHub repository was created successfully at `iabouemira95/devops-guided-project`
+- `CI Build Push` succeeded on `main`
+- the workflow ran tests, built the image, and published:
+  - `ghcr.io/iabouemira95/devops-guided-project/devops-mini-app:latest`
+  - `ghcr.io/iabouemira95/devops-guided-project/devops-mini-app:sha-22f8b59`
+
+### Remaining Gaps
+
+#### 6. `deploy-vm.yml` had a workflow parser defect
+
+- symptom: workflow dispatch failed with `Unrecognized named-value: 'secrets'`
+- root cause: step `if:` expressions referenced `secrets` directly
+- status: fixed in the workflow
+
+#### 7. GitHub-hosted VM deploy is still blocked by SSH authentication
+
+- symptom: the deploy workflow now dispatches and reaches the SSH step, but the GitHub-hosted runner receives `Permission denied (publickey)`
+- evidence: local SSH from the instructor machine works with the same VM key, while the GitHub workflow runner does not
+- impact: the full trainee GitHub deploy path is not yet complete
+- likely next checks:
+  - verify the exact private key format expected by the VM against the stored GitHub secret
+  - verify whether the VM or cloud environment applies any SSH restrictions that differ for GitHub-hosted runners
+  - test with a dedicated deployment key generated specifically for GitHub Actions
+
+#### 8. The registry story is still split between GHCR and ACR during validation
+
+- symptom: CI publishes to GHCR, while the manually validated VM runtime in this dry run used ACR credentials and an ACR image path
+- impact: the core student story should converge on one default registry path
+- follow-up: decide one default deploy registry for the guided path, then align:
+  - `.env` and `deploy/example.env`
+  - GitHub deploy secrets
+  - LAB-06 and LAB-07 wording
+  - validation examples
+
 ## Next Review Focus
 
 - complete the GitHub Actions path with valid GitHub authentication
