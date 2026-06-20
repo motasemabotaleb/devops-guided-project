@@ -177,10 +177,10 @@ esac
 
 check_dir "${PROJECT_DIR}/logs/app"
 check_dir "${PROJECT_DIR}/logs/nginx"
-check_file "${PROJECT_DIR}/logs/nginx/access.log"
-check_file "${PROJECT_DIR}/logs/nginx/error.log"
 
 if [[ "${MODE}" != "static" ]]; then
+  check_file "${PROJECT_DIR}/logs/nginx/access.log"
+  check_file "${PROJECT_DIR}/logs/nginx/error.log"
   validate_endpoints "${BASE_URL}"
 fi
 
