@@ -126,17 +126,20 @@ jobs:
           set -euo pipefail
 
           key_file="${RUNNER_TEMP}/vm-deploy-key.pem"
+          ssh_config_file="${RUNNER_TEMP}/vm-ssh-config"
           printf '%s\n' "${VM_SSH_KEY}" > "${key_file}"
           chmod 600 "${key_file}"
 
-          ssh_args=(
-            -i "${key_file}"
-            -o StrictHostKeyChecking=no
-            -o UserKnownHostsFile=/dev/null
-            "${VM_USER}@${VM_HOST}"
-          )
+          cat > "${ssh_config_file}" <<EOF
+          Host vm-target
+            HostName ${VM_HOST}
+            User ${VM_USER}
+            IdentityFile ${key_file}
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
 
-          ssh "${ssh_args[@]}" <<EOF
+          ssh -F "${ssh_config_file}" vm-target <<EOF
           export IMAGE_TAG='${IMAGE_TAG}'
           export POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'
           export GRAFANA_ADMIN_PASSWORD='${GRAFANA_ADMIN_PASSWORD}'
