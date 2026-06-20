@@ -23,6 +23,25 @@ compose_ps() {
   docker compose -f docker-compose.vm.yml ps
 }
 
+sync_runtime_metadata_file() {
+  local image_tag_value="$1"
+  local git_sha_value="${2:-}"
+
+  if grep -q '^IMAGE_TAG=' "${ENV_FILE}"; then
+    sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${image_tag_value}/" "${ENV_FILE}"
+  else
+    printf '\nIMAGE_TAG=%s\n' "${image_tag_value}" >> "${ENV_FILE}"
+  fi
+
+  if [[ -n "${git_sha_value}" ]]; then
+    if grep -q '^GIT_SHA=' "${ENV_FILE}"; then
+      sed -i "s/^GIT_SHA=.*/GIT_SHA=${git_sha_value}/" "${ENV_FILE}"
+    else
+      printf 'GIT_SHA=%s\n' "${git_sha_value}" >> "${ENV_FILE}"
+    fi
+  fi
+}
+
 show_post_deploy_summary() {
   local version_json health_json ready_json
 
@@ -157,6 +176,13 @@ load_registry_settings_from_secrets_file
 if [[ -n "${IMAGE_TAG_INPUT}" ]]; then
   export IMAGE_TAG="${IMAGE_TAG_INPUT}"
 fi
+
+DEPLOY_GIT_SHA=""
+if [[ "${IMAGE_TAG}" == sha-* ]]; then
+  DEPLOY_GIT_SHA="${IMAGE_TAG#sha-}"
+fi
+
+sync_runtime_metadata_file "${IMAGE_TAG}" "${DEPLOY_GIT_SHA}"
 
 validate_required_values
 
