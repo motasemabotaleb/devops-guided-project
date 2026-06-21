@@ -2,136 +2,78 @@ name: Deploy Production
 
 on:
   workflow_run:
-    workflows:
-      - Publish Image
-    types:
-      - completed
+    workflows: ["Publish Image"]
+    types: [completed]
+
   workflow_dispatch:
     inputs:
       image_tag:
-        description: Image tag to deploy
         required: true
-
-concurrency:
-  group: production-deploy
-  cancel-in-progress: false
-
-permissions:
-  contents: read
 
 jobs:
   deploy:
-    name: deploy-production
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
-    environment:
-      name: production
+
     env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+
+      ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+      ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+
       VM_HOST: ${{ secrets.VM_HOST }}
       VM_USER: ${{ secrets.VM_USER }}
       VM_APP_DIR: ${{ secrets.VM_APP_DIR }}
-      VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+
       VM_SSH_KEY_B64: ${{ secrets.VM_SSH_KEY_B64 }}
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
       POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
       GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
 
     steps:
       - name: Select image tag
-        id: image-tag
+        id: tag
         run: |
-          set -euo pipefail
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            image_tag="${{ inputs.image_tag }}"
+            echo "image_tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
           else
-            short_sha="$(printf '%s' '${{ github.event.workflow_run.head_sha }}' | cut -c1-7)"
-            image_tag="sha-${short_sha}"
-          fi
-          echo "image_tag=${image_tag}" >> "${GITHUB_OUTPUT}"
-          echo "Selected image tag: ${image_tag}"
-
-      - name: Validate required secrets
-        run: |
-          set -euo pipefail
-          missing=0
-          for key in POSTGRES_PASSWORD GRAFANA_ADMIN_PASSWORD VM_HOST VM_USER VM_APP_DIR AWS_REGION AWS_ACCOUNT_ID AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
-            if [ -z "${!key:-}" ]; then
-              echo "Missing required secret: ${key}"
-              missing=1
-            fi
-          done
-          if [ -z "${VM_SSH_KEY_B64:-}" ] && [ -z "${VM_SSH_KEY:-}" ]; then
-            echo "Missing VM SSH key."
-            missing=1
-          fi
-          if [ "${missing}" -eq 1 ]; then exit 1; fi
-
-      - name: Setup SSH connection
-        run: |
-          set -euo pipefail
-
-          key_file="${RUNNER_TEMP}/vm-deploy-key.pem"
-          ssh_config_file="${RUNNER_TEMP}/vm-ssh-config"
-
-          if [ -n "${VM_SSH_KEY_B64:-}" ]; then
-            printf '%s' "${VM_SSH_KEY_B64}" | tr -d '\r\n' | base64 --decode > "${key_file}"
-          else
-            printf '%s\n' "${VM_SSH_KEY}" | sed 's/\r$//' > "${key_file}"
+            sha=$(echo "${{ github.event.workflow_run.head_sha }}" | cut -c1-7)
+            echo "image_tag=sha-$sha" >> $GITHUB_OUTPUT
           fi
 
-          chmod 600 "${key_file}"
-          ssh-keygen -y -f "${key_file}" >/dev/null
-
-          cat > "${ssh_config_file}" <<SSHEOF
-          Host vm-target
-            HostName ${VM_HOST}
-            User ${VM_USER}
-            IdentityFile ${key_file}
-            StrictHostKeyChecking no
-            UserKnownHostsFile /dev/null
-          SSHEOF
-
-          ssh -F "${ssh_config_file}" vm-target "echo SSH connection to ${VM_HOST} succeeded."
-
-      - name: Sync latest code to VM
+      - name: Login to ECR
         run: |
-          set -euo pipefail
+          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+          aws configure set region $AWS_REGION
 
-          ssh_config_file="${RUNNER_TEMP}/vm-ssh-config"
+          aws ecr get-login-password --region $AWS_REGION \
+            | docker login --username AWS --password-stdin $ECR_REGISTRY
 
-          ssh -F "${ssh_config_file}" vm-target "
-            set -euo pipefail
-            cd '${VM_APP_DIR}'
-            git fetch --all --prune
-            git reset --hard origin/main
-            git clean -fd
-          "
-
-      - name: Deploy selected tag to VM
-        env:
-          IMAGE_TAG: ${{ steps.image-tag.outputs.image_tag }}
-          IMAGE_URI: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/myapp
+      - name: Setup SSH
         run: |
-          set -euo pipefail
+          echo "$VM_SSH_KEY_B64" | base64 -d > key.pem
+          chmod 600 key.pem
 
-          ssh_config_file="${RUNNER_TEMP}/vm-ssh-config"
+      - name: Deploy to EC2
+        run: |
+          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.tag.outputs.image_tag }}"
 
-          ssh -F "${ssh_config_file}" vm-target <<DEPLOYEOF
-          export IMAGE_TAG='${IMAGE_TAG}'
-          export IMAGE_URI='${IMAGE_URI}'
-          export POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'
-          export GRAFANA_ADMIN_PASSWORD='${GRAFANA_ADMIN_PASSWORD}'
-          export AWS_ACCESS_KEY_ID='${AWS_ACCESS_KEY_ID}'
-          export AWS_SECRET_ACCESS_KEY='${AWS_SECRET_ACCESS_KEY}'
-          export AWS_REGION='${AWS_REGION}'
-          export AWS_ACCOUNT_ID='${AWS_ACCOUNT_ID}'
-          cd '${VM_APP_DIR}'
-          bash deploy/deploy.sh '${IMAGE_TAG}'
-          DEPLOYEOF
+          ssh -i key.pem -o StrictHostKeyChecking=no $VM_USER@$VM_HOST <<EOF
+          set -e
+
+          cd $VM_APP_DIR
+
+          export IMAGE_TAG="${{ steps.tag.outputs.image_tag }}"
+          export POSTGRES_PASSWORD="$POSTGRES_PASSWORD"
+          export GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD"
+
+          docker login -u AWS -p "$(aws ecr get-login-password --region $AWS_REGION)" $ECR_REGISTRY
+
+          docker pull $IMAGE
+
+          docker compose -f docker-compose.vm.yml up -d
+
+          docker ps
+          EOF
