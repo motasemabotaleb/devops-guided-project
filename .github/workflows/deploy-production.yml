@@ -18,7 +18,6 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   deploy:
@@ -32,147 +31,52 @@ jobs:
     environment:
       name: production
     env:
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      AZURE_KEYVAULT_NAME: ${{ secrets.AZURE_KEYVAULT_NAME }}
       VM_HOST: ${{ secrets.VM_HOST }}
       VM_USER: ${{ secrets.VM_USER }}
       VM_APP_DIR: ${{ secrets.VM_APP_DIR }}
       VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
       VM_SSH_KEY_B64: ${{ secrets.VM_SSH_KEY_B64 }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
 
     steps:
       - name: Select image tag
         id: image-tag
         run: |
           set -euo pipefail
-
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             image_tag="${{ inputs.image_tag }}"
           else
             short_sha="$(printf '%s' '${{ github.event.workflow_run.head_sha }}' | cut -c1-7)"
             image_tag="sha-${short_sha}"
           fi
-
           echo "image_tag=${image_tag}" >> "${GITHUB_OUTPUT}"
           echo "Selected image tag: ${image_tag}"
 
-      - name: Load runtime secret fallback from GitHub Secrets
-        env:
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
-          REGISTRY_LOGIN_SERVER: ${{ secrets.REGISTRY_LOGIN_SERVER }}
-          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+      - name: Validate required secrets
         run: |
           set -euo pipefail
-
-          for key in POSTGRES_PASSWORD GRAFANA_ADMIN_PASSWORD REGISTRY_LOGIN_SERVER REGISTRY_USERNAME REGISTRY_PASSWORD; do
-            value="${!key}"
-            if [ -n "${value}" ]; then
-              echo "::add-mask::${value}"
-              printf '%s=%s\n' "${key}" "${value}" >> "${GITHUB_ENV}"
-            fi
-          done
-
-      - name: Azure login for Azure Key Vault access
-        if: ${{ env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != '' && env.AZURE_SUBSCRIPTION_ID != '' && env.AZURE_KEYVAULT_NAME != '' }}
-        uses: azure/login@v1
-        with:
-          client-id: ${{ env.AZURE_CLIENT_ID }}
-          tenant-id: ${{ env.AZURE_TENANT_ID }}
-          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Read deployment secrets from Azure Key Vault
-        if: ${{ env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != '' && env.AZURE_SUBSCRIPTION_ID != '' && env.AZURE_KEYVAULT_NAME != '' }}
-        env:
-          AZURE_CORE_OUTPUT: none
-          AZURE_KEYVAULT_NAME: ${{ env.AZURE_KEYVAULT_NAME }}
-        uses: azure/CLI@v1
-        with:
-          inlineScript: |
-            set -euo pipefail
-
-            fetch_secret() {
-              local secret_name="$1"
-              local secret_value
-              secret_value="$(az keyvault secret show --vault-name "${AZURE_KEYVAULT_NAME}" --name "${secret_name}" --query value -o tsv 2>/dev/null || true)"
-
-              if [ -n "${secret_value}" ]; then
-                echo "::add-mask::${secret_value}"
-                printf '%s=%s\n' "${secret_name}" "${secret_value}" >> "${GITHUB_ENV}"
-                echo "Loaded ${secret_name} from Azure Key Vault."
-              else
-                echo "Azure Key Vault did not return ${secret_name}. Keeping the GitHub Secrets fallback if it exists."
-              fi
-            }
-
-            fetch_secret POSTGRES_PASSWORD
-            fetch_secret GRAFANA_ADMIN_PASSWORD
-            fetch_secret REGISTRY_LOGIN_SERVER
-            fetch_secret REGISTRY_USERNAME
-            fetch_secret REGISTRY_PASSWORD
-
-      - name: Validate deployment secret availability
-        run: |
-          set -euo pipefail
-
           missing=0
-
-          for key in POSTGRES_PASSWORD GRAFANA_ADMIN_PASSWORD; do
+          for key in POSTGRES_PASSWORD GRAFANA_ADMIN_PASSWORD VM_HOST VM_USER VM_APP_DIR AWS_REGION AWS_ACCOUNT_ID AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
             if [ -z "${!key:-}" ]; then
-              echo "Missing required deployment secret: ${key}"
+              echo "Missing required secret: ${key}"
               missing=1
             fi
           done
-
-          if [ "${missing}" -eq 1 ]; then
-            echo "Provide the missing value in Azure Key Vault or GitHub Secrets fallback."
-            exit 1
-          fi
-
-      - name: Validate VM connection settings
-        run: |
-          set -euo pipefail
-
-          missing=0
-
-          for key in VM_HOST VM_USER VM_APP_DIR; do
-            if [ -z "${!key:-}" ]; then
-              echo "Missing required VM setting: ${key}"
-              missing=1
-            fi
-          done
-
           if [ -z "${VM_SSH_KEY_B64:-}" ] && [ -z "${VM_SSH_KEY:-}" ]; then
-            echo "Missing VM SSH key. Set VM_SSH_KEY_B64 or VM_SSH_KEY in GitHub Secrets."
+            echo "Missing VM SSH key."
             missing=1
           fi
-
-          if [ "${missing}" -eq 1 ]; then
-            echo "Add the missing VM settings in GitHub Secrets before running Deploy Production."
-            exit 1
-          fi
-
-      - name: Show selected secret source
-        run: |
-          set -euo pipefail
-
-          if [ -n "${AZURE_CLIENT_ID}" ] && [ -n "${AZURE_TENANT_ID}" ] && [ -n "${AZURE_SUBSCRIPTION_ID}" ] && [ -n "${AZURE_KEYVAULT_NAME}" ]; then
-            echo "Using Azure Key Vault as the preferred runtime secret source."
-          else
-            echo "Using GitHub Secrets fallback for runtime secrets."
-          fi
+          if [ "${missing}" -eq 1 ]; then exit 1; fi
 
       - name: Deploy selected tag to VM
         env:
           IMAGE_TAG: ${{ steps.image-tag.outputs.image_tag }}
-          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
-          GRAFANA_ADMIN_PASSWORD: ${{ env.GRAFANA_ADMIN_PASSWORD }}
-          REGISTRY_LOGIN_SERVER: ${{ env.REGISTRY_LOGIN_SERVER }}
-          REGISTRY_USERNAME: ${{ env.REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ env.REGISTRY_PASSWORD }}
+          IMAGE_URI: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/myapp
         run: |
           set -euo pipefail
 
@@ -181,33 +85,32 @@ jobs:
 
           if [ -n "${VM_SSH_KEY_B64:-}" ]; then
             printf '%s' "${VM_SSH_KEY_B64}" | tr -d '\r\n' | base64 --decode > "${key_file}"
-            echo "Loaded VM SSH key from VM_SSH_KEY_B64."
           else
             printf '%s\n' "${VM_SSH_KEY}" | sed 's/\r$//' > "${key_file}"
-            echo "Loaded VM SSH key from VM_SSH_KEY."
           fi
 
           chmod 600 "${key_file}"
           ssh-keygen -y -f "${key_file}" >/dev/null
 
-          cat > "${ssh_config_file}" <<EOF
+          cat > "${ssh_config_file}" <<SSHEOF
           Host vm-target
             HostName ${VM_HOST}
             User ${VM_USER}
             IdentityFile ${key_file}
             StrictHostKeyChecking no
             UserKnownHostsFile /dev/null
-          EOF
+          SSHEOF
 
           ssh -F "${ssh_config_file}" vm-target "echo SSH connection to ${VM_HOST} succeeded."
 
-          ssh -F "${ssh_config_file}" vm-target <<EOF
+          ssh -F "${ssh_config_file}" vm-target <<DEPLOYEOF
           export IMAGE_TAG='${IMAGE_TAG}'
+          export IMAGE_URI='${IMAGE_URI}'
           export POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'
           export GRAFANA_ADMIN_PASSWORD='${GRAFANA_ADMIN_PASSWORD}'
-          export REGISTRY_LOGIN_SERVER='${REGISTRY_LOGIN_SERVER}'
-          export REGISTRY_USERNAME='${REGISTRY_USERNAME}'
-          export REGISTRY_PASSWORD='${REGISTRY_PASSWORD}'
+          export AWS_ACCESS_KEY_ID='${AWS_ACCESS_KEY_ID}'
+          export AWS_SECRET_ACCESS_KEY='${AWS_SECRET_ACCESS_KEY}'
+          export AWS_REGION='${AWS_REGION}'
           cd '${VM_APP_DIR}'
           bash deploy/deploy.sh '${IMAGE_TAG}'
-          EOF
+          DEPLOYEOF
