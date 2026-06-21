@@ -21,7 +21,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24.17.0
           cache: npm
           cache-dependency-path: app/package-lock.json
 
@@ -43,43 +43,30 @@ jobs:
     name: build-push-and-scan
     needs: test-and-validate
     runs-on: ubuntu-latest
+
     env:
-      REGISTRY_LOGIN_SERVER: ${{ secrets.REGISTRY_LOGIN_SERVER }}
-      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-      IMAGE_NAME: ${{ secrets.REGISTRY_LOGIN_SERVER }}/devops-mini-app
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      IMAGE_NAME: app
+      IMAGE_URI: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/devops-mini-app
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Validate ACR configuration
-        run: |
-          set -euo pipefail
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-          missing=0
-
-          for key in REGISTRY_LOGIN_SERVER REGISTRY_USERNAME REGISTRY_PASSWORD; do
-            if [ -z "${!key:-}" ]; then
-              echo "Missing required registry secret: ${key}"
-              missing=1
-            fi
-          done
-
-          if [ "${missing}" -eq 1 ]; then
-            echo "Configure ACR secrets before running the publish path."
-            exit 1
-          fi
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Log in to ACR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY_LOGIN_SERVER }}
-          username: ${{ env.REGISTRY_USERNAME }}
-          password: ${{ env.REGISTRY_PASSWORD }}
 
       - name: Create image tags
         id: image-tags
@@ -90,16 +77,16 @@ jobs:
         with:
           context: .
           file: docker/app.Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:sha-${{ steps.image-tags.outputs.short_sha }}
+            ${{ env.IMAGE_URI }}:latest
+            ${{ env.IMAGE_URI }}:sha-${{ steps.image-tags.outputs.short_sha }}
 
       - name: Scan published image
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ steps.image-tags.outputs.short_sha }}
+          image-ref: ${{ env.IMAGE_URI }}:sha-${{ steps.image-tags.outputs.short_sha }}
           format: table
           vuln-type: os,library
           severity: HIGH,CRITICAL
@@ -109,5 +96,5 @@ jobs:
       - name: Show pushed image names
         run: |
           echo "Published images:"
-          echo "${IMAGE_NAME}:latest"
-          echo "${IMAGE_NAME}:sha-${{ steps.image-tags.outputs.short_sha }}"
+          echo "${IMAGE_URI}:latest"
+          echo "${IMAGE_URI}:sha-${{ steps.image-tags.outputs.short_sha }}"
