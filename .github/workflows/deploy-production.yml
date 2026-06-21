@@ -1,37 +1,39 @@
 name: Deploy Production
-
 on:
   workflow_run:
     workflows: ["Publish Image"]
     types: [completed]
-
   workflow_dispatch:
     inputs:
       image_tag:
         required: true
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
-
       ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
       ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-
       VM_HOST: ${{ secrets.VM_HOST }}
       VM_USER: ${{ secrets.VM_USER }}
       VM_APP_DIR: ${{ secrets.VM_APP_DIR }}
-
       VM_SSH_KEY_B64: ${{ secrets.VM_SSH_KEY_B64 }}
-
       POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
       GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
-
     steps:
+      - name: Sanity-check required secrets are set (lengths only, never values)
+        run: |
+          for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION ECR_REGISTRY ECR_REPOSITORY VM_HOST VM_USER VM_APP_DIR VM_SSH_KEY_B64 POSTGRES_PASSWORD GRAFANA_ADMIN_PASSWORD; do
+            val="${!var}"
+            if [ -z "$val" ]; then
+              echo "::error::Secret/env $var is EMPTY"
+              exit 1
+            fi
+            echo "$var: set (length ${#val})"
+          done
+
       - name: Select image tag
         id: tag
         run: |
@@ -42,14 +44,19 @@ jobs:
             echo "image_tag=sha-$sha" >> $GITHUB_OUTPUT
           fi
 
-      - name: Login to ECR
+      - name: Login to ECR (runner) and verify image exists
         run: |
-          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
-          aws configure set region $AWS_REGION
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+          aws configure set region "$AWS_REGION"
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-          aws ecr get-login-password --region $AWS_REGION \
-            | docker login --username AWS --password-stdin $ECR_REGISTRY
+          aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --region "$AWS_REGION" \
+            --image-ids imageTag=${{ steps.tag.outputs.image_tag }} \
+            || { echo "::error::Tag ${{ steps.tag.outputs.image_tag }} not found in $ECR_REPOSITORY"; exit 1; }
 
       - name: Setup SSH
         run: |
@@ -59,21 +66,22 @@ jobs:
       - name: Deploy to EC2
         run: |
           IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.tag.outputs.image_tag }}"
-
-          ssh -i key.pem -o StrictHostKeyChecking=no $VM_USER@$VM_HOST <<EOF
+          ssh -i key.pem -o StrictHostKeyChecking=no "$VM_USER@$VM_HOST" \
+            "AWS_ACCESS_KEY_ID='$AWS_ACCESS_KEY_ID' \
+             AWS_SECRET_ACCESS_KEY='$AWS_SECRET_ACCESS_KEY' \
+             AWS_REGION='$AWS_REGION' \
+             IMAGE_TAG='${{ steps.tag.outputs.image_tag }}' \
+             POSTGRES_PASSWORD='$POSTGRES_PASSWORD' \
+             GRAFANA_ADMIN_PASSWORD='$GRAFANA_ADMIN_PASSWORD' \
+             bash -s" <<EOF
           set -e
-
           cd $VM_APP_DIR
-
-          export IMAGE_TAG="${{ steps.tag.outputs.image_tag }}"
-          export POSTGRES_PASSWORD="$POSTGRES_PASSWORD"
-          export GRAFANA_ADMIN_PASSWORD="$GRAFANA_ADMIN_PASSWORD"
-
-          docker login -u AWS -p "$(aws ecr get-login-password --region $AWS_REGION)" $ECR_REGISTRY
-
+          aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
+          aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
+          aws configure set region "\$AWS_REGION"
+          aws ecr get-login-password --region "\$AWS_REGION" \
+            | docker login --username AWS --password-stdin $ECR_REGISTRY
           docker pull $IMAGE
-
           docker compose -f docker-compose.vm.yml up -d
-
           docker ps
           EOF
