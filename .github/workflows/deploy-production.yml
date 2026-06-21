@@ -73,10 +73,7 @@ jobs:
           fi
           if [ "${missing}" -eq 1 ]; then exit 1; fi
 
-      - name: Deploy selected tag to VM
-        env:
-          IMAGE_TAG: ${{ steps.image-tag.outputs.image_tag }}
-          IMAGE_URI: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/myapp
+      - name: Setup SSH connection
         run: |
           set -euo pipefail
 
@@ -102,6 +99,29 @@ jobs:
           SSHEOF
 
           ssh -F "${ssh_config_file}" vm-target "echo SSH connection to ${VM_HOST} succeeded."
+
+      - name: Sync latest code to VM
+        run: |
+          set -euo pipefail
+
+          ssh_config_file="${RUNNER_TEMP}/vm-ssh-config"
+
+          ssh -F "${ssh_config_file}" vm-target "
+            set -euo pipefail
+            cd '${VM_APP_DIR}'
+            git fetch --all --prune
+            git reset --hard origin/main
+            git clean -fd
+          "
+
+      - name: Deploy selected tag to VM
+        env:
+          IMAGE_TAG: ${{ steps.image-tag.outputs.image_tag }}
+          IMAGE_URI: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/myapp
+        run: |
+          set -euo pipefail
+
+          ssh_config_file="${RUNNER_TEMP}/vm-ssh-config"
 
           ssh -F "${ssh_config_file}" vm-target <<DEPLOYEOF
           export IMAGE_TAG='${IMAGE_TAG}'
