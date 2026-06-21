@@ -62,26 +62,34 @@ jobs:
         run: |
           echo "$VM_SSH_KEY_B64" | base64 -d > key.pem
           chmod 600 key.pem
-
       - name: Deploy to EC2
         run: |
           IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.tag.outputs.image_tag }}"
           ssh -i key.pem -o StrictHostKeyChecking=no "$VM_USER@$VM_HOST" \
             "AWS_ACCESS_KEY_ID='$AWS_ACCESS_KEY_ID' \
-             AWS_SECRET_ACCESS_KEY='$AWS_SECRET_ACCESS_KEY' \
-             AWS_REGION='$AWS_REGION' \
-             IMAGE_TAG='${{ steps.tag.outputs.image_tag }}' \
-             POSTGRES_PASSWORD='$POSTGRES_PASSWORD' \
-             GRAFANA_ADMIN_PASSWORD='$GRAFANA_ADMIN_PASSWORD' \
-             bash -s" <<EOF
+            AWS_SECRET_ACCESS_KEY='$AWS_SECRET_ACCESS_KEY' \
+            AWS_REGION='$AWS_REGION' \
+            IMAGE_TAG='${{ steps.tag.outputs.image_tag }}' \
+            POSTGRES_PASSWORD='$POSTGRES_PASSWORD' \
+            GRAFANA_ADMIN_PASSWORD='$GRAFANA_ADMIN_PASSWORD' \
+            bash -s" <<EOF
           set -e
+
+          echo "AWS_ACCESS_KEY_ID=\$AWS_ACCESS_KEY_ID"
+          echo "AWS_REGION=\$AWS_REGION"
+          echo "IMAGE_TAG=\$IMAGE_TAG"
+          echo "POSTGRES_PASSWORD=\$POSTGRES_PASSWORD"
+          echo "GRAFANA_ADMIN_PASSWORD=\$GRAFANA_ADMIN_PASSWORD"
+
           cd $VM_APP_DIR
-          echo $ECR_REPOSITORY
+
           aws configure set aws_access_key_id "\$AWS_ACCESS_KEY_ID"
           aws configure set aws_secret_access_key "\$AWS_SECRET_ACCESS_KEY"
           aws configure set region "\$AWS_REGION"
+
           aws ecr get-login-password --region "\$AWS_REGION" \
             | docker login --username AWS --password-stdin $ECR_REGISTRY
+
           docker pull $IMAGE
           docker compose -f docker-compose.vm.yml up -d
           docker ps
