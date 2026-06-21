@@ -189,9 +189,13 @@ validate_required_values
 section "Deploy"
 info "Deploying ${APP_IMAGE}:${IMAGE_TAG}"
 
-if [[ -n "${REGISTRY_LOGIN_SERVER:-}" && -n "${REGISTRY_USERNAME:-}" && -n "${REGISTRY_PASSWORD:-}" ]]; then
-  info "Logging in to container registry ${REGISTRY_LOGIN_SERVER}..."
-  printf '%s' "${REGISTRY_PASSWORD}" | docker login "${REGISTRY_LOGIN_SERVER}" --username "${REGISTRY_USERNAME}" --password-stdin
+if [[ -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" && -n "${AWS_REGION:-}" && -n "${AWS_ACCOUNT_ID:-}" ]]; then
+  info "Logging in to Amazon ECR..."
+  aws configure set aws_access_key_id "${AWS_ACCESS_KEY_ID}"
+  aws configure set aws_secret_access_key "${AWS_SECRET_ACCESS_KEY}"
+  aws configure set region "${AWS_REGION}"
+  aws ecr get-login-password --region "${AWS_REGION}" | \
+    docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 fi
 
 cd "${PROJECT_DIR}"
