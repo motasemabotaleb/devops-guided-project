@@ -216,4 +216,5 @@ docker compose -f docker-compose.vm.yml logs app --tail=50 || true
 docker compose -f docker-compose.vm.yml logs nginx --tail=50 || true
 exit 1
 
-عدله 
+
+ 
