@@ -189,9 +189,10 @@ validate_required_values
 section "Deploy"
 info "Deploying ${APP_IMAGE}:${IMAGE_TAG}"
 
+# تعديل تسجيل الدخول ليتوافق تماماً مع AWS ECR بدون مشاكل مسافات أو صلاحيات
 if [[ -n "${REGISTRY_LOGIN_SERVER:-}" && -n "${REGISTRY_USERNAME:-}" && -n "${REGISTRY_PASSWORD:-}" ]]; then
-  info "Logging in to container registry ${REGISTRY_LOGIN_SERVER}..."
-  printf '%s' "${REGISTRY_PASSWORD}" | docker login "${REGISTRY_LOGIN_SERVER}" --username "${REGISTRY_USERNAME}" --password-stdin
+  info "Logging in to AWS Amazon ECR ${REGISTRY_LOGIN_SERVER}..."
+  printf '%s' "${REGISTRY_PASSWORD}" | docker login --username "${REGISTRY_USERNAME}" --password-stdin "${REGISTRY_LOGIN_SERVER}"
 fi
 
 cd "${PROJECT_DIR}"
